@@ -36,7 +36,40 @@ plt.title('Violin Plot of y-coordinates per Dataset')
 plt.tight_layout()
 plt.show()
 
+# Detemine and print correlation between x and y for each dataset
+correlations = df.groupby('dataset').apply(lambda group: group['x'].corr(group['y']))
+print('Correlation between x and y for each dataset:')                      
+print(correlations)
+
+# Determine and print covariance matrix for each dataset
+cov_matrices = df.groupby('dataset').apply(lambda group: np.cov(group['x'], group['y']))
+print('Covariance matrix for each dataset:')
+for dataset, cov_matrix in cov_matrices.items():
+    print(f'Dataset: {dataset}')
+    print(cov_matrix)
+    print()
+
+# Determine linear regression between x and y for each dataset, and print slope,intercept and r-value for each dataset (hint use scipy.stats.linregress)
+regressions = df.groupby('dataset').apply(lambda group: stats.linregress(group['x'], group['y']))
+print('Linear regression for each dataset:')
+for dataset, regression in regressions.items():
+    print(f'Dataset: {dataset}')
+    print(f'Slope: {regression.slope}, Intercept: {regression.intercept}, R-value: {regression.rvalue}')
+    print()     
 
 
+# Create scatterplots for all datasets (hint: use FacetGrid and map_dataframe)
+g = sns.FacetGrid(df, col='dataset', col_wrap=3, height=4)
+g.map_dataframe(sns.scatterplot, x='x', y='y')
+g.set_axis_labels('x', 'y')
+g.set_titles('Dataset: {col_name}')
+plt.tight_layout()
+plt.show()
 
+# Create scatterplots including the regression line for all datasets (hint: use lmplot)
+g = sns.lmplot(x='x', y='y', col='dataset', col_wrap=3, height=4, data=df)
+g.set_axis_labels('x', 'y')
+g.set_titles('Dataset: {col_name}')
+plt.tight_layout()
+plt.show()
 
