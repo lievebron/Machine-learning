@@ -18,65 +18,66 @@ import matplotlib.pyplot as plt
 
 
 # %% 1 CUSTOM TRANSFORMER VOOR CORR + SELECTK
-class CorrAndSelect(BaseEstimator, TransformerMixin):
-    def __init__(self, corr_threshold=0.9):
-        # self.k = k
-        self.corr_threshold = corr_threshold
+# vooraf eerst definieren 
+class CorrAndSelect(BaseEstimator, TransformerMixin): # definieert nieuw type object, BaseE voegt bouwstenen toe zodat je kunt gebruiken in functie zoals randomSearch (bv get_params), TransfMix voegt methode fit_transform toe
+    def __init__(self, corr_threshold=0.9): # deze functie wordt 1 keer uitgevoerd op moment je klasse aanroept, lokale variable 0.9. Leeg object creeeren binnen het werkgeheugen
+        self.corr_threshold = corr_threshold # koppelt getal aan dat object?
     
-    def fit(self, X, y):
-        if not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X, columns=[f"f{i}" for i in range(X.shape[1])])
+    def fit(self, X, y): #start leerfase van object self, x zijn de features en y zijn de labels
+        if not isinstance(X, pd.DataFrame): #controle of binnenkomende data pd dataframe is (tabel met kolomnamen)
+            X = pd.DataFrame(X, columns=[f"f{i}" for i in range(X.shape[1])]) # als het nog geen pd dataframe is dan dwing je het hier dr in en geeft die namen f0,f1,f2 enz
 
-    # Constanten verwijderen
-        self.var_thresh_ = VarianceThreshold(threshold=0)
-        X_const = pd.DataFrame(self.var_thresh_.fit_transform(X), 
-                           columns=X.columns[self.var_thresh_.get_support()])
-        self.const_kept_features_ = X_const.columns
+    ## Constanten verwijderen
+        self.var_thresh_ = VarianceThreshold(threshold=0) # berekent variantie van elke colom, markeert de rijen met 0 verandering voor verwijdering
+        X_const = pd.DataFrame(self.var_thresh_.fit_transform(X), # scant data en verwijdert direct constant kolommen, krijgt kale matrix zonder namen, pd om tabelstructuur te houden
+                           columns=X.columns[self.var_thresh_.get_support()]) # get support geeft lijst met true of false voor elke kolom, zo selecteer je alleen namen van kolommen die NIET verwijderd zijn en plak je deze terug in nieuwe tabel X_const
+        self.const_kept_features_ = X_const.columns # overgebleven kolommen/features opgeslagen in self
 
     # Correlatie filter
-        corr_matrix = X_const.corr(method='spearman').abs()
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        self.to_drop_ = [col for col in upper.columns if any(upper[col] > self.corr_threshold)]
-        X_filtered = X_const.drop(columns=self.to_drop_)
+        corr_matrix = X_const.corr(method='spearman').abs() # correlatie berekenen tussen overgebleven features, adhv spearman en alles positief maken correlatie naar boven en naar bedenen even kut
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)) # Deze regel "maskeert" de onderste helft en de diagonaal. Je houdt alleen de bovendriehoek van de tabel over. Zo voorkom je dat je features dubbel checkt of een feature met zichzelf vergelijkt.
+        self.to_drop_ = [col for col in upper.columns if any(upper[col] > self.corr_threshold)] # als boven de threshold dan op de zwarte lijst, vormt dus de zwarte lijst
+        X_filtered = X_const.drop(columns=self.to_drop_) # features op zwarte lijst worden verwijderd, kolom verwijderen welke? die in self.to_drop staan.
 
     # **Houd alle overgebleven features**
-        self.features_ = X_filtered.columns
+        self.features_ = X_filtered.columns # opslaan in geheugen
+                                            # Wanneer je later de test-set verwerkt, weet de machine dankzij self.features_ precies welke x kolommen hij moet overhouden, zonder dat hij de hele berekening opnieuw hoeft te doen.
 
-        return self
+        return self # ketting verbreken, pipeline kan door met andere klasse
     
-    def transform(self, X):
-        if not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X, columns=[f"f{i}" for i in range(X.shape[1])])
+    def transform(self, X): # net waren we bij de leerfase nu bij de uitvoeringsfase
+        if not isinstance(X, pd.DataFrame): # zorgen dat binnenkomen data nette tabel is
+            X = pd.DataFrame(X, columns=[f"f{i}" for i in range(X.shape[1])]) # als geen nette tabel is naam geven f0,f1,f2 enz
         
-        X_const = pd.DataFrame(self.var_thresh_.transform(X),
-                               columns=X.columns[self.var_thresh_.get_support()])
-        X_filtered = X_const.drop(columns=self.to_drop_, errors='ignore')
-        X_selected = X_filtered[self.features_]
-        return X_selected
+        X_const = pd.DataFrame(self.var_thresh_.transform(X), # machine pakt de var_thresh_ uit zijn geheugen en verwijdert uit deze nieuwe data precies die kolommen die tijdens het trainen constant bleken te zijn
+                               columns=X.columns[self.var_thresh_.get_support()]) # rekent dus niet opnieuw uit maar voert uit wat hier boven geleerd is
+        X_filtered = X_const.drop(columns=self.to_drop_, errors='ignore') # features op de zwarte lijst er uitgooien, als een feature op zwarte lijst er niet in staat (wat error kan geven) gaat tie gewoon door
+        X_selected = X_filtered[self.features_] # self.features waren hierboven overgebleven, filtert tabel zodat alleen die kolommen overblijven in de exacte volgorde van de training
+        return X_selected # schone tabel klaar voor RF
     
     # %% 2 LOAD DATA
 data = load_data()
-X = data.select_dtypes(include=[np.number])
-y = data['label'].map({'benign': 0, 'malignant': 1})
+X = data.select_dtypes(include=[np.number]) # alle kolommen met getallen overhouden, de rest weggooien, dus X tabel met alleen numeriek features
+y = data['label'].map({'benign': 0, 'malignant': 1}) # feature genaamd label omzetten in cijfers, x en y zijn door pd aan elkaar verbonden
 
-f2_scorer = make_scorer(fbeta_score, beta=2)
+f2_scorer = make_scorer(fbeta_score, beta=2) # f2 score maken met beta=2
 
 
 # %% 3 TRAIN/TEST SPLIT
-X_trainval, X_test, y_trainval, y_test = train_test_split(
-    X, y, test_size=0.2, stratify=y, random_state=42
+X_trainval, X_test, y_trainval, y_test = train_test_split( # data opdelen in train en test set 80/20
+    X, y, test_size=0.2, stratify=y, random_state=42 # stratify y geeft gelijke verhouding van ben/mal voor beide groepen en 42 zorgt dat het reproduceerbaar is doordat hierdoor altijd exacte dezelfde groepen maakt
 )
 
 # %% 4 NESTED CV
-outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42) 
-inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
+outer_cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42) # verdelen in 5 folds met gelijken verhoudingen, reproduceerbaar en shuffle aka kaarten schudden voor verdelen
+inner_cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42) # hetzelde maar dan in 3
 
-all_y_outer = []
-all_y_outer_proba = []
+all_y_outer = [] # hierin wordt de def diagnose opgeslagen
+all_y_outer_proba = [] # kansberekening van de diagnose 
 
-feature_importances_list = []
-best_params_list = []
-fold_aucs = []
+feature_importances_list = [] # slaat per fold op welke features meest voorspellend zijn, van alle 5 folds
+best_params_list = [] # optimale instelling van RF per fold, van alle 5 folds
+fold_aucs = [] # AUC-score van validatie folds, alle 5
 
 for outer_train_idx, outer_val_idx in outer_cv.split(X_trainval, y_trainval):
     X_outer_train = X_trainval.iloc[outer_train_idx].copy()
