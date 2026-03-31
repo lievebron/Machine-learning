@@ -79,21 +79,21 @@ feature_importances_list = [] # slaat per fold op welke features meest voorspell
 best_params_list = [] # optimale instelling van RF per fold, van alle 5 folds
 fold_aucs = [] # AUC-score van validatie folds, alle 5
 
-for outer_train_idx, outer_val_idx in outer_cv.split(X_trainval, y_trainval):
-    X_outer_train = X_trainval.iloc[outer_train_idx].copy()
-    X_outer_val = X_trainval.iloc[outer_val_idx].copy()
-    y_outer_train = y_trainval.iloc[outer_train_idx]
+for outer_train_idx, outer_val_idx in outer_cv.split(X_trainval, y_trainval): # lijstje van indexen maken welke patient in welke groep mee doet
+    X_outer_train = X_trainval.iloc[outer_train_idx].copy() # mri getallen pakken van 149 train patienten en kopie maken zodat er niks aangepast wordt in het bron bestand, eigen kladje om in te strepen
+    X_outer_val = X_trainval.iloc[outer_val_idx].copy() # mri getallen pakken van 37 validatie patienten en kopie maken
+    y_outer_train = y_trainval.iloc[outer_train_idx] # dezelfde split doen voor de diagnose zodat uitslagen bij de jusiste patient blijven, hier passen we nooit wat in aan dus geen kladje nodig
     y_outer_val = y_trainval.iloc[outer_val_idx]
 
-    # Pipeline voor inner loop: correlatie + univariate + scaling + classifier
-    pipeline = Pipeline([
+    # Pipeline bepalen voor inner loop: correlatie + scaling + classifier
+    pipeline = Pipeline([        
     ('feat_select', CorrAndSelect(corr_threshold=0.9)),
     ('scaler', RobustScaler()),
     ('clf', RandomForestClassifier(random_state=42))
 ])
 
     param_dist = {
-    'clf__n_estimators': [100, 200, 300, 500],
+    'clf__n_estimators': [100, 200, 300, 500], # officele namen met clf tag er aan zodat weet over welk deel in pipeline het gaat
     'clf__max_depth': [None, 5, 10, 20],
     'clf__min_samples_split': [2, 5, 10]
 }
