@@ -146,11 +146,11 @@ class DataFrameRobustScaler(BaseEstimator, TransformerMixin):
 def build_pipeline():
     # Dit is de uiteindelijke logistic regression die de voorspelling maakt.
     final_lr = LogisticRegression(
-        C=1.0,
-        penalty="l2",
-        solver="liblinear",
-        max_iter=10000,
-        random_state=RANDOM_STATE,
+        C=1.0, # regularisatie-sterkte laag remt c veel en hoog niet
+        penalty="l2", # L2-penalty (ook wel Ridge genoemd) zorgt ervoor dat geen enkele feature (zoals ADC of Volume) een extreem hoog gewicht krijgt in de formule. Het dwingt het model om het belang een beetje te verdelen over alle features, wat het model stabieler maakt. Als één meting dan een keer een foutje bevat, stort niet je hele voorspelling in.
+        solver="liblinear", # keuze, deze werkt goed met kleine datasets
+        max_iter=10000, # zo veel kansen om perfecte lijn te vinden
+        random_state=RANDOM_STATE, # voor reproduceerbaarheid
     )
 
     # Dit bouwt de volledige pipeline: filteren, schalen, univariate selectie en classificatie.
@@ -362,7 +362,7 @@ def run_nested_cv(X_trainval, y_trainval):
             background = scaled_train_final.sample(
                 background_size, random_state=RANDOM_STATE
             )
-            explainer = shap.LinearExplainer(best_model.named_steps["clf"], background)
+            explainer = shap.LinearExplainer(best_model.named_steps["clf"], background) # linear want geen RF boom
             shap_values = explainer(scaled_train_final)
 
             # Bewaar per fold alleen wat nodig is voor de uiteindelijke nested samenvatting.
