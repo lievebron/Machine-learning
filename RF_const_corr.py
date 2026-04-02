@@ -87,7 +87,7 @@ for outer_train_idx, outer_val_idx in outer_cv.split(X_trainval, y_trainval): # 
 
     # Pipeline bepalen voor inner loop: correlatie + scaling + classifier
     pipeline = Pipeline([        
-    ('feat_select', CorrAndSelect(corr_threshold=0.9)),
+    ('feat_select', CorrAndSelect(corr_threshold=0.9)), #in feat_select staan overledende features die overblijven na corr en const selectie
     ('scaler', RobustScaler()),
     ('clf', RandomForestClassifier(random_state=42))
 ])
@@ -116,7 +116,7 @@ for outer_train_idx, outer_val_idx in outer_cv.split(X_trainval, y_trainval): # 
 
     # Beste model toepassen op outer validation fold
     best_model = grid_search.best_estimator_ # grid search 30 opties geprobeerd, de winnaar noemen we best model, winnaar wordt gekozen op basis van de F2 score gedefineerd hierboven
-    y_outer_proba = best_model.predict_proba(X_outer_val)[:,1] # machine kijkt naar test fold, berekent voor ieder een probability, voor ROC-curve alleen kans op maligne meenemen (1)
+    y_outer_proba = best_model.predict_proba(X_outer_val)[:,1] # machine kijkt naar validatie fold, berekent voor ieder een probability, voor ROC-curve alleen kans op maligne meenemen (1)
 
     # Print aantal features na const + correlatie
     X_const = pd.DataFrame( # passen de zeeg die we eerder in het geheugen hebben gezet toe dus de contanten worden er uitgehaald
@@ -132,7 +132,7 @@ for outer_train_idx, outer_val_idx in outer_cv.split(X_trainval, y_trainval): # 
     f"na corr={X_corr.shape[1]}"    # N features na correlatie verwijderen
 )
 
-    all_y_outer.extend(y_outer_val) # extend want plakt het er direct als getallen achteraan, plakt na iedere ronde de getallen van de fold er achter aan van test set
+    all_y_outer.extend(y_outer_val) # extend want plakt het er direct als getallen achteraan, plakt na iedere ronde de getallen van de fold er achter aan van validatie set
     all_y_outer_proba.extend(y_outer_proba) # hetzelfde maar dan voor de probability score
 
     fold_auc = roc_auc_score(y_outer_val, y_outer_proba) # berekening van AUC, lijst met diagnoses van de testset en de bijhorende kansscore
@@ -190,37 +190,37 @@ pipeline_final = Pipeline([
 pipeline_final.fit(X_trainval, y_trainval) # volledige 80% trainings set gebruiken, machine gaat leren adhv volledige trainingsdata
 
 # 4 Transformeer test set en predict proba
-X_test_transformed = pipeline_final.named_steps['feat_select'].transform(X_test) # de features verwijdert die hij hier boven heeft opgeslagen als slechte featers?
-y_test_proba = pipeline_final.named_steps['clf'].predict_proba(X_test_transformed)[:,1] # model geeft waarschijnlijkheid op maligne, enkel deze kans bewaren
+X_test_transformed = pipeline_final.named_steps['feat_select'].transform(X_test) # de features verwijdert die hij hier boven heeft opgeslagen als slechte featers
+y_test_proba = pipeline_final.named_steps['clf'].predict_proba(X_test_transformed)[:,1] # model geeft waarschijnlijkheid op maligne, enkel deze kans bewaren van het test set (eigenlijk te vroeg gebruikt!)
 
 # 7 SHAP ANALYSE OP FINAL MODEL
-X_model = pipeline_final.named_steps['feat_select'].transform(X_trainval)
-X_model = pd.DataFrame(X_model, columns=pipeline_final.named_steps['feat_select'].features_)
+X_model = pipeline_final.named_steps['feat_select'].transform(X_trainval) # training data pakken, je wilt voor de SHAP weten wat model nou eigenlijk onthouden heeft
+X_model = pd.DataFrame(X_model, columns=pipeline_final.named_steps['feat_select'].features_) # Maak een tabel van de getallen in X_model, en gebruik de namen uit de feat_select stap als kopjes boven de kolommen
 
-explainer = shap.TreeExplainer(pipeline_final.named_steps['clf'])
-shap_values = explainer.shap_values(X_model)
+explainer = shap.TreeExplainer(pipeline_final.named_steps['clf']) # kijkt naar alle mogelijke combinaties van routes die een patiënt door de bomen kan afleggen. Hij berekent voor elke feature (bijv. ADC of Volume) wat de gemiddelde impact is op de uiteindelijke kans-score.
+shap_values = explainer.shap_values(X_model) # krijgt voor elke patiënt en elke feature een getal dat aangeeft of dat kenmerk de kans op kanker omhoog heeft geduwd of juist omlaag, schaduw tabel van x_model
 
-# SHAP array correct afhandelen
-if isinstance(shap_values, list):
+# SHAP array correct afhandelen (ligt aan welke shap je hebt daarom dit stukje) omdat je model een keuze moet maken tussen twee klassen (0 = Benigne en 1 = Maligne), rekent SHAP voor elk getal in je X_model ook twee invloeden uit.
+if isinstance(shap_values, list):  # vragen of shap values verpakt zijn in twee mappen (moet kiezen tussen twee klassen dus kan ook van beide kanten berekenen) als dat zo is dan alleen maligne meenemen
     shap_vals = np.array(shap_values[1])
-elif shap_values.ndim == 3:
-    shap_vals = shap_values[:, :, 1]
+elif shap_values.ndim == 3: # anders geeft shap wellicht als een 3D-blok, patienten, features, 2 klasse
+    shap_vals = shap_values[:, :, 1] # dan graag alle patienten, features en enkel klasse maligne geven
 else:
-    shap_vals = shap_values
+    shap_vals = shap_values # het is al direct een tabel
 
-mean_abs_shap = np.abs(shap_vals).mean(axis=0)
-assert mean_abs_shap.shape[0] == X_model.shape[1], \
-    f"Feature mismatch: {mean_abs_shap.shape[0]} vs {X_model.shape[1]}"
+mean_abs_shap = np.abs(shap_vals).mean(axis=0) # absoluut waarden van shap nemen en dan de shap waarde gemiddelde per feature berekenen
+assert mean_abs_shap.shape[0] == X_model.shape[1], \ # veiligheidscheck of elke kolom een shap gemiddelde hebben berekend
+    f"Feature mismatch: {mean_abs_shap.shape[0]} vs {X_model.shape[1]}" # dit is de foutmelding die je dan zou krijgen
 
-shap_importance = pd.DataFrame({
+shap_importance = pd.DataFrame({  # namen ophalen van de features en deze in tabel zetten met de gemiddelde shap waarde
     "feature": X_model.columns,
     "mean_abs_shap": mean_abs_shap
-}).sort_values(by="mean_abs_shap", ascending=False)
+}).sort_values(by="mean_abs_shap", ascending=False) # sorteren op impact score van hoog naar laag, belangrijkste featuers dus bovenaan
 
 # Top 20 SHAP features plotten
-plt.figure(figsize=(10,6))
-plt.barh(shap_importance.head(20).feature[::-1], 
-         shap_importance.head(20).mean_abs_shap[::-1])
+plt.figure(figsize=(10,6)) # figure openen met aangegeven grootte
+plt.barh(shap_importance.head(20).feature[::-1],  # horizontale staafdiagram, namen van de top 20 features op y-as (trucje om te draaien zodat belangrijkste bovenaan komen te staan)
+         shap_importance.head(20).mean_abs_shap[::-1]) # bepaalt lengte van de staven aka gemidd shap waarde (ook draaien ofc om te matchen)
 plt.xlabel("Mean Absolute SHAP Value")
 plt.title("Top 20 SHAP Feature Importance")
 plt.show()
@@ -228,14 +228,15 @@ plt.show()
 # 8 Print gekozen hyperparameters
 print("\nGekozen hyperparameters RandomForest final model:")
 for param, value in pipeline_final.named_steps['clf'].get_params().items():
-    print(f"{param}: {value}")
+    print(f"{param}: {value}") # RF doorlopen om van iedere aangepaste hyperparameter de waarde te geven
 
 # %%
 # %% Nested ROC curve
 from sklearn.metrics import roc_curve, auc
 
 # ROC curve berekenen op outer fold predictions
-fpr, tpr, thresholds = roc_curve(all_y_outer, all_y_outer_proba)
+# hieronder plotten van de ROC curve van de nested CV
+fpr, tpr, thresholds = roc_curve(all_y_outer, all_y_outer_proba) # 
 roc_auc_nested = auc(fpr, tpr)
 
 plt.figure(figsize=(8,6))
@@ -251,19 +252,19 @@ plt.grid(alpha=0.3)
 plt.show()
 
 
-# %%
-def Forest_const_cor(test=False):
+# %% 
+def Forest_const_cor(test=False): # hele code in een functie verpakt, standaard berekent de functie alleen de resultaten van de training (Nested CV). Pas als je expliciet test=True roept vanuit het Master Script, wordt de "echte" testset gebruikt.
 
-    results = {
+    results = {   # Je slaat de roc_auc en nested_f2 op die je eerder in het script hebt berekend tijdens de Nested Cross-Validation.
     "nested_auc_const_cor": float(roc_auc),
     "nested_f2_const_cor": float(nested_f2),
     "fold_aucs_const_cor": (fold_aucs),
 
 }
 
-    pipeline_final.fit(X_trainval, y_trainval)
+    pipeline_final.fit(X_trainval, y_trainval) # volledige trainings set testen
 
-    if test:
+    if test: # wordt alleen uitgevoerd als masterscript zegt dat het de winnaar is aka testen op die 20%
         test_scores = pipeline_final.predict_proba(X_test)[:,1]
         test_pred = (test_scores > 0.5).astype(int)
         test_auc = roc_auc_score(y_test, test_scores)
@@ -274,4 +275,4 @@ def Forest_const_cor(test=False):
         results["y_test"] = y_test 
         results["test_scores"] = test_scores  
 
-    return results
+    return results # terug geven aan masterscript
