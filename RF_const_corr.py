@@ -98,83 +98,83 @@ for outer_train_idx, outer_val_idx in outer_cv.split(X_trainval, y_trainval): # 
     'clf__min_samples_split': [2, 5, 10]
 }
 
-    # Inner loop GridSearchCV
+    # Inner loop GridSearchCV eerst definieren
     grid_search = RandomizedSearchCV(
-        estimator=pipeline,
-        param_distributions=param_dist,
-        n_iter=30,           
-        cv=inner_cv,
-        scoring=f2_scorer,
-        n_jobs=1,
+        estimator=pipeline, # hele pipeline bekijken
+        param_distributions=param_dist,  # menu met opties
+        n_iter=30,           # 30 willekeurige combinaties worden geprobeerd
+        cv=inner_cv,    # binnenste ring gebruiken 
+        scoring=f2_scorer,  # rapportcijfer of basis van F2 hoe goed een combinatie van hyperparameters werkt
+        n_jobs=1,    # standaard op -1 maar toen duurde het heel lang, gaat over computer processor
         random_state=42)
     
-    grid_search.fit(X_outer_train, y_outer_train)
+    grid_search.fit(X_outer_train, y_outer_train) # nu daadwerkelijk uitvoeren, je geeft de 4 folds dus hieruit moet tie er weer 3 maken
 
-    best_params_list.append(grid_search.best_params_)
+    best_params_list.append(grid_search.best_params_) # pakketje met de beste knoppen dmv append in de klaargezete bestparams zetten
 
-    print(f"Outer fold best params: {grid_search.best_params_}")
+    print(f"Outer fold best params: {grid_search.best_params_}") # printen van beste hyperparameters, voor iedere 5 folds
 
     # Beste model toepassen op outer validation fold
-    best_model = grid_search.best_estimator_
-    y_outer_proba = best_model.predict_proba(X_outer_val)[:,1]
+    best_model = grid_search.best_estimator_ # grid search 30 opties geprobeerd, de winnaar noemen we best model, winnaar wordt gekozen op basis van de F2 score gedefineerd hierboven
+    y_outer_proba = best_model.predict_proba(X_outer_val)[:,1] # machine kijkt naar test fold, berekent voor ieder een probability, voor ROC-curve alleen kans op maligne meenemen (1)
 
     # Print aantal features na const + correlatie
-    X_const = pd.DataFrame(
-    best_model.named_steps['feat_select'].var_thresh_.transform(X_outer_train),
+    X_const = pd.DataFrame( # passen de zeeg die we eerder in het geheugen hebben gezet toe dus de contanten worden er uitgehaald
+    best_model.named_steps['feat_select'].var_thresh_.transform(X_outer_train), # dankzij transform verwijder je niks uit een lijst maar maak je een nieuwe lijst dus hier niet error=ignore nodig
     columns=best_model.named_steps['feat_select'].const_kept_features_)
 
-    X_corr = X_const.drop(columns=best_model.named_steps['feat_select'].to_drop_, errors="ignore")
-    X_selected = X_corr[best_model.named_steps['feat_select'].features_]
+    X_corr = X_const.drop(columns=best_model.named_steps['feat_select'].to_drop_, errors="ignore") # hier geef je een lijst en vertel je welke verwijderen, als die er dan niet in staat gewoon door gaan
+    X_selected = X_corr[best_model.named_steps['feat_select'].features_] # selecteren van juiste eindselectie en in juiste volgorde zetten!
 
     print(
-    f"Outer fold: Features orig={X_outer_train.shape[1]}, "
-    f"na const={X_const.shape[1]}, "
-    f"na corr={X_corr.shape[1]}"
+    f"Outer fold: Features orig={X_outer_train.shape[1]}, " # N features in begin
+    f"na const={X_const.shape[1]}, "    # N features na constant verwijderen
+    f"na corr={X_corr.shape[1]}"    # N features na correlatie verwijderen
 )
 
-    all_y_outer.extend(y_outer_val)
-    all_y_outer_proba.extend(y_outer_proba)
+    all_y_outer.extend(y_outer_val) # extend want plakt het er direct als getallen achteraan, plakt na iedere ronde de getallen van de fold er achter aan van test set
+    all_y_outer_proba.extend(y_outer_proba) # hetzelfde maar dan voor de probability score
 
-    fold_auc = roc_auc_score(y_outer_val, y_outer_proba)
-    fold_aucs.append(fold_auc)
-    print(f"Outer fold AUC: {fold_auc:.3f}")
+    fold_auc = roc_auc_score(y_outer_val, y_outer_proba) # berekening van AUC, lijst met diagnoses van de testset en de bijhorende kansscore
+    fold_aucs.append(fold_auc) # lege lijst boven in gedefinieerd, append is new item toegoeven achteraan aka AUC van de fold
+    print(f"Outer fold AUC: {fold_auc:.3f}") # printen op 3 decimalen
 
     # Feature importances opslaan (alleen geselecteerde features)
-    selected_features = best_model.named_steps['feat_select'].features_
-    importances = best_model.named_steps['clf'].feature_importances_
-    feature_importances_list.append(pd.DataFrame({
+    selected_features = best_model.named_steps['feat_select'].features_ # best_model is winnende pipeline uit grid search voor 1 fold, hier vraag je de namen van de features weer terug want die worden in RF niet meegenomen
+    importances = best_model.named_steps['clf'].feature_importances_ # feature belangrijkheids score bij iedere feature ophalen
+    feature_importances_list.append(pd.DataFrame({ # hier voeg je in de eerder gedefinieerde (lege) lijst voeg je in een nette tabel de feature naam en score toe
         'feature': selected_features,
         'importance': importances
     }))
 
 # %% 5 EVALUATE NESTED CV
-roc_auc = roc_auc_score(all_y_outer, all_y_outer_proba)
-print(f"Nested CV ROC-AUC: {roc_auc:.3f}")
+roc_auc = roc_auc_score(all_y_outer, all_y_outer_proba) # deze hebben we al gevuld met de AUC van alle 5 de folds nu een AUC score berekenen over alle 5 de folds de testfold samen
+print(f"Nested CV ROC-AUC: {roc_auc:.3f}") # deze printen op 3 decimalen
 
 from sklearn.metrics import fbeta_score
 
 # probabilities -> class labels
-y_pred = (np.array(all_y_outer_proba) >= 0.5).astype(int)
+y_pred = (np.array(all_y_outer_proba) >= 0.5).astype(int) # lijst maken met alle probabilities, als hoger dan 0.5 dan true/maligne, aka def diagnoses maken op basis van onze scores van het model
 
 # F2 score
-nested_f2 = fbeta_score(all_y_outer, y_pred, beta=2)
-print(f"\nNested CV F2-score: {nested_f2:.3f}")
+nested_f2 = fbeta_score(all_y_outer, y_pred, beta=2) # F2 score uitvoeren, gaat de gegeven lijst af next to de voorspelling en kijkt naar TP,TN,FP,FN
+print(f"\nNested CV F2-score: {nested_f2:.3f}") # score printen op 3 decimalen
 
 
 # %% 7 FINAL MODEL MET BESTE HYPERPARAMETERS VAN NESTED CV
 
 # 1 Kies de beste hyperparameters van de outer folds
-best_params = grid_search.best_params_
+best_params = grid_search.best_params_ # pakt de winnende hyperparameters van de laatste fold (nr5), maakt niet uit uit welke fold hij deze namenlijst haalt, want in elke fold zijn dezelfde hyperparameters gebruikt om aan te draaien.
 
-final_params = {}
-for param in best_params_list[0].keys():
-    values = [p[param] for p in best_params_list]
-    final_params[param] = Counter(values).most_common(1)[0][0]
+final_params = {} # nieuwe leeg kladje aan maken
+for param in best_params_list[0].keys(): # voor de param in die lijst zoals hierboven aangehaald gaan we kijken/opnieuw instellen
+    values = [p[param] for p in best_params_list] # lijst maken per parameter wat de beste waren voor de 5 folds
+    final_params[param] = Counter(values).most_common(1)[0][0] # final parameters kiezen door te kijken welke het meeste voorkomt, lijstje maken welke op 1 staat en dan, [0] zegt eerste pakketje pakken uit lijst en daarna eerste getal pakken uit de haakjes
 
-print("Consensus hyperparameters over alle outer folds:")
-print(final_params)
+print("Consensus hyperparameters over alle outer folds:") # print de labels van de hyperparameters
+print(final_params) # print de inhoud van de stemronde hierboven, dus van iedere hyperparameter de waarde van de beste
 
-# 2 Maak final pipeline met dezelfde CorrAndSelect config en beste RF params
+# 2 Maak final pipeline met dezelfde CorrAndSelect config en beste RF hyperparamaters toevoegen!
 pipeline_final = Pipeline([
     ('feat_select', CorrAndSelect(corr_threshold=0.9)),
     ('scaler', RobustScaler()),
@@ -186,12 +186,12 @@ pipeline_final = Pipeline([
     ))
 ])
 
-# 3 Fit pipeline op volledige trainval set
-pipeline_final.fit(X_trainval, y_trainval)
+# 3 Fit pipeline op volledige trainval set 
+pipeline_final.fit(X_trainval, y_trainval) # volledige 80% trainings set gebruiken, machine gaat leren adhv volledige trainingsdata
 
 # 4 Transformeer test set en predict proba
-X_test_transformed = pipeline_final.named_steps['feat_select'].transform(X_test)
-y_test_proba = pipeline_final.named_steps['clf'].predict_proba(X_test_transformed)[:,1]
+X_test_transformed = pipeline_final.named_steps['feat_select'].transform(X_test) # de features verwijdert die hij hier boven heeft opgeslagen als slechte featers?
+y_test_proba = pipeline_final.named_steps['clf'].predict_proba(X_test_transformed)[:,1] # model geeft waarschijnlijkheid op maligne, enkel deze kans bewaren
 
 # 7 SHAP ANALYSE OP FINAL MODEL
 X_model = pipeline_final.named_steps['feat_select'].transform(X_trainval)
