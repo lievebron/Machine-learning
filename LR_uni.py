@@ -46,14 +46,14 @@ N_RANDOM_SEARCH_ITERATIONS = 20
 N_JOBS = 1
 F_BETA = 2
 ROC_OUTPUT_PATH = "roc_curve_nested_cv_lg.png"
-MIN_FEATURE_FOLD_COUNT = 3
+MIN_FEATURE_FOLD_COUNT = 3 
 SHAP_OUTPUT_DIR = "shap_outputs_nested_cv_lg"
 
 
 class CorrAndSelect(BaseEstimator, TransformerMixin):
     # Dit combineert het verwijderen van constante/gecorreleerde features met univariate selectie.
-    def __init__(self, k=200, corr_threshold=0.9):
-        self.k = k
+    def __init__(self, k=200, corr_threshold=0.9): # k=200 wordt overwritten in hyperparameters testen
+        self.k = k # k in geheugen van computer opslaan
         self.corr_threshold = corr_threshold
 
     def _to_dataframe(self, X):
@@ -69,32 +69,32 @@ class CorrAndSelect(BaseEstimator, TransformerMixin):
         X_df = self._to_dataframe(X)
         self.feature_names_in_ = X_df.columns.to_list()
 
-        # Dit verwijdert features zonder variatie, omdat die niets bijdragen aan het model.
-        constant_mask = X_df.nunique(dropna=False) <= 1
-        self.constant_features_ = X_df.columns[constant_mask].to_list()
+        # Dit verwijdert features zonder variatie (constante), omdat die niets bijdragen aan het model.
+        constant_mask = X_df.nunique(dropna=False) <= 1 # telt hoeveelheid unique waarden in feature staan, als gelijk is aan 1 dan constant, en NaN zien als unieke waarde
+        self.constant_features_ = X_df.columns[constant_mask].to_list()  # onthouden welke constant zijn
         self.near_constant_features_ = []
         self.removed_low_variation_features_ = self.constant_features_
         X_non_constant = X_df.drop(
             columns=self.removed_low_variation_features_,
-            errors="ignore",
-        )
+            errors="ignore",  # hier daadwerkelijk schoonmaken constanten worden er uitgegooid
+        )         
 
         # Dit zoekt sterk gecorreleerde features zodat we redundante informatie kunnen schrappen.
-        corr_matrix = X_non_constant.corr(method="spearman").abs().fillna(0)
-        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+        corr_matrix = X_non_constant.corr(method="spearman").abs().fillna(0) # absoluut strepen en als berekening mislukt dan vul je nul in
+        upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool)) # A met B vergelijken dus zorgen dat niet ook nog eens B met A vergeleken wordt
         self.to_drop_ = [
-            col for col in upper.columns if any(upper[col] > self.corr_threshold)
-        ]
+            col for col in upper.columns if any(upper[col] > self.corr_threshold) # laten vallen als hoger dan threshold
+        ] 
 
-        X_filtered = X_non_constant.drop(columns=self.to_drop_, errors="ignore")
+        X_filtered = X_non_constant.drop(columns=self.to_drop_, errors="ignore") # verwijderen uit de lijst
 
         if X_filtered.shape[1] == 0:
             raise ValueError("No features left after constant/correlation filtering.")
 
         # Dit houdt de best scorende features over via univariate ANOVA-selectie.
-        k_value = min(self.k, X_filtered.shape[1])
-        self.selector_ = SelectKBest(score_func=f_classif, k=k_value)
-        self.selector_.fit(X_filtered, y)
+        k_value = min(self.k, X_filtered.shape[1]) # pak er k maar als je minder dan k over zijn ga dan met dat aantal door
+        self.selector_ = SelectKBest(score_func=f_classif, k=k_value) # berekent of de gemiddelde waarde van die feature tussen die twee groepen significant verschilt, grotere f score beter voorspeller
+        self.selector_.fit(X_filtered, y) # lijstje maken van de top features en onthoud k aantal
 
         # Dit bewaart zowel de gekozen features als tussentijdse aantallen voor rapportage.
         self.features_ = X_filtered.columns[self.selector_.get_support()].to_list()
@@ -104,7 +104,7 @@ class CorrAndSelect(BaseEstimator, TransformerMixin):
         self.n_after_univariate_ = len(self.features_)
         return self
 
-    def transform(self, X):
+    def transform(self, X): # in deze regels voer je wat je hierboven getrained hebt toch uit op nieuwe data dus er worden gewoon de hierboven onthouden feature verwijdert
         # Dit past precies dezelfde filtering en selectie toe op nieuwe data.
         X_df = self._to_dataframe(X)
         X_non_constant = X_df.drop(
@@ -137,11 +137,11 @@ class DataFrameRobustScaler(BaseEstimator, TransformerMixin):
         return self
 
     def transform(self, X):
-        # Dit schaalt nieuwe data en geeft die weer terug als DataFrame.
+        # Dit schaalt nieuwe data op basis van wat er geleerd is hier boven en geeft die weer terug als DataFrame.
         X_df = self._to_dataframe(X)
         transformed = self.scaler_.transform(X_df)
         return pd.DataFrame(transformed, columns=self.feature_names_in_, index=X_df.index)
-
+# LR houd hier de namen van de features bij de gewichten, in RF wordt gewoon als NumPy teruggegeven
 
 def build_pipeline():
     # Dit is de uiteindelijke logistic regression die de voorspelling maakt.
@@ -165,12 +165,12 @@ def build_pipeline():
 
 def compute_fbeta_from_proba(y_true, y_proba, beta=F_BETA, threshold=0.5):
     # Dit zet kansen om naar klasses en berekent daarna de F-beta score.
-    y_pred = (np.array(y_proba) >= threshold).astype(int)
-    return float(fbeta_score(y_true, y_pred, beta=beta, zero_division=0))
+    y_pred = (np.array(y_proba) >= threshold).astype(int) # boven 0,5 wordt het 1, true/false omzetten in 0/1
+    return float(fbeta_score(y_true, y_pred, beta=beta, zero_division=0)) # veiligheid zodat niet door nul delen
 
 
 def summarize_params(best_params_per_fold):
-    # Dit kiest per hyperparameter de meest voorkomende beste waarde over de outer folds.
+    # Dit kiest per hyperparameter de meest voorkomende beste waarde over de outer folds, 'majority voting' principe toepassen
     summary = {}
     for key in best_params_per_fold[0]:
         values = [params[key] for params in best_params_per_fold]
@@ -180,8 +180,8 @@ def summarize_params(best_params_per_fold):
 
 def summarize_feature_stability(features_per_fold):
     # Dit telt hoe vaak elke feature geselecteerd werd over alle outer folds.
-    all_features = [feature for fold_features in features_per_fold for feature in fold_features]
-    return Counter(all_features)
+    all_features = [feature for fold_features in features_per_fold for feature in fold_features] # pak lijstje van fold 1, pak de feature, en in nieuwe vector
+    return Counter(all_features) # snapt niet hoe je lijstjes met tellen in lijstjes dus daarom ff op een grote hoop gooien
 
 
 def save_roc_curve(y_true, y_scores, roc_auc, output_path=ROC_OUTPUT_PATH):
@@ -232,7 +232,7 @@ def run_nested_shap_summary(nested_shap_payload, output_dir=SHAP_OUTPUT_DIR):
 
     # Maak de outputmap aan voor de csv-samenvatting.
     output_path = Path(output_dir)
-    output_path.mkdir(exist_ok=True)
+    output_path.mkdir(exist_ok=True) # als er al een is oke dan doorgaan
 
     combined_shap_frames = []
     for fold_payload in nested_shap_payload:
@@ -241,11 +241,11 @@ def run_nested_shap_summary(nested_shap_payload, output_dir=SHAP_OUTPUT_DIR):
             fold_payload["shap_values"],
             columns=fold_payload["feature_names"],
             index=fold_payload["index"],
-        ).reindex(columns=all_features, fill_value=0.0)
+        ).reindex(columns=all_features, fill_value=0.0) # lijst maken met alle features die ooit gekozen zijn in folds, als een feature niet aanwezig was krijg tie 0 logisch want dan ook 0 invloed
         combined_shap_frames.append(shap_frame)
 
     # Voeg SHAP-resultaten uit alle outer folds samen voor een nested CV-overzicht.
-    combined_shap = pd.concat(combined_shap_frames, axis=0).sort_index()
+    combined_shap = pd.concat(combined_shap_frames, axis=0).sort_index() # een giga tabel waarin voor elke patient de shap staan, dit op inex sorteren
 
     # Gebruik de gemiddelde absolute SHAP-waarde als globale feature importance.
     importance_df = (
@@ -257,7 +257,7 @@ def run_nested_shap_summary(nested_shap_payload, output_dir=SHAP_OUTPUT_DIR):
         )
         .sort_values("mean_abs_shap", ascending=False)
         .reset_index(drop=True)
-    )
+    ) # resultaat feature die gemiddeld een hoge afwijking veroorzaakt (of dat nu omhoog of omlaag is), komt bovenaan de lijst te staan.
 
     # Bewaar alleen de compacte samenvatting als csv.
     importance_df.to_csv(output_path / "nested_shap_importance.csv", index=False)
@@ -302,7 +302,7 @@ def run_nested_cv(X_trainval, y_trainval):
 
     for fold_idx, (outer_train_idx, outer_val_idx) in enumerate(
         outer_cv.split(X_trainval, y_trainval),
-        start=1,
+        start=1, # eerste fold heet 1 ipv 0
     ):
         print(f"\n--- Outer fold {fold_idx} ---")
 
@@ -318,23 +318,23 @@ def run_nested_cv(X_trainval, y_trainval):
             param_distributions=param_dist,
             n_iter=N_RANDOM_SEARCH_ITERATIONS,
             cv=inner_cv,
-            scoring=make_scorer(fbeta_score, beta=F_BETA, zero_division=0),
+            scoring=make_scorer(fbeta_score, beta=F_BETA, zero_division=0), # als je door 0 moet delen noem het dan gewoon 0
             n_jobs=N_JOBS,
             random_state=RANDOM_STATE,
         )
         search.fit(X_outer_train, y_outer_train)
 
         # Dit pakt het beste model uit deze outer fold en leest de geselecteerde features uit.
-        best_model = search.best_estimator_
-        selector = best_model.named_steps["feat_select"]
+        best_model = search.best_estimator_ # geef model met de beste f2 score
+        selector = best_model.named_steps["feat_select"] # De selector geeft je de mogelijkheid om data te filteren en namen op te vragen, maar de waarde van de hyperparameters (k) vind je in de best_params_.
 
         # Dit gebruikt kansen voor klasse 1 als continue score voor AUC en classificatie-evaluatie.
-        y_outer_proba = best_model.predict_proba(X_outer_val)[:, 1]
+        y_outer_proba = best_model.predict_proba(X_outer_val)[:, 1] # alleen geinteresserd op kans op ziek dus alleen tweede kolom meenemen
         fold_auc = roc_auc_score(y_outer_val, y_outer_proba)
         fold_f2 = compute_fbeta_from_proba(y_outer_val, y_outer_proba)
 
         # Dit bepaalt welke features na univariate selectie echt overblijven.
-        selected_features = selector.features_
+        selected_features = selector.features_ # welke features zijn er in dit model meegenomen
 
         # Dit bewaart alle foldresultaten zodat we die later samen kunnen vatten.
         all_y_outer.extend(y_outer_val)
@@ -348,7 +348,7 @@ def run_nested_cv(X_trainval, y_trainval):
         # nested CV te interpreteren zonder de testset te gebruiken.
         if shap is not None:
             scaled_train = pd.DataFrame(
-                best_model.named_steps["scaler"].transform(
+                best_model.named_steps["scaler"].transform( # features weggooien die niet hebben overleefd en schalen, en mooie tabel maken
                     selector.transform(X_outer_train)
                 ),
                 columns=selector.features_,
@@ -358,12 +358,12 @@ def run_nested_cv(X_trainval, y_trainval):
             scaled_train_final = scaled_train
 
             # Neem een kleine achtergrondset voor een stabiele en snellere SHAP-berekening.
-            background_size = min(100, len(scaled_train_final))
+            background_size = min(100, len(scaled_train_final)) # achtergrond nodig anders kun je niet vergelijken of hoog of laag is
             background = scaled_train_final.sample(
                 background_size, random_state=RANDOM_STATE
             )
             explainer = shap.LinearExplainer(best_model.named_steps["clf"], background) # linear want geen RF boom
-            shap_values = explainer(scaled_train_final)
+            shap_values = explainer(scaled_train_final) # Deze patiënt heeft een extreem lage ADC. Hoeveel extra procent kans op kanker komt er door dit specifieke getal bovenop die 20%?" De explainer rekent dit uit voor elke feature
 
             # Bewaar per fold alleen wat nodig is voor de uiteindelijke nested samenvatting.
             nested_shap_payload.append(
@@ -409,7 +409,7 @@ def run_nested_cv(X_trainval, y_trainval):
 
 
 def run_regular_5fold_cv(X_trainval, y_trainval, common_params):
-    # Dit voert nog een gewone 5-fold CV uit met de meest gekozen hyperparameters.
+    # Dit voert nog een gewone 5-fold CV uit met de meest gekozen hyperparameters, dus geen nested nu gewoon 5 fold met beste hyperparameters instelling
     pipeline = build_pipeline()
     pipeline.set_params(**common_params)
 
@@ -439,7 +439,7 @@ def run_regular_5fold_cv(X_trainval, y_trainval, common_params):
 
     # Dit geeft de gemiddelde score en spreiding terug voor rapportage.
     return {
-        "roc_auc_mean": float(np.mean(roc_auc_scores)),
+        "roc_auc_mean": float(np.mean(roc_auc_scores)), # gemiddelde ROCauc van de 5 folds
         "roc_auc_std": float(np.std(roc_auc_scores)),
         "f2_mean": float(np.mean(f2_scores)),
         "f2_std": float(np.std(f2_scores)),
@@ -575,7 +575,7 @@ def Logistic_Uni(test=False):
     test_scores = final_pipeline.predict_proba(X_test)[:, 1]
 
     if test:
-        # Evalueer pas hier op de echte testset nadat het model is gekozen.
+        # Evalueer pas hier op de echte testset nadat het model is gekozen. 
         test_auc = roc_auc_score(y_test, test_scores)
         test_pred = (test_scores > 0.5).astype(int)
         test_f2 = fbeta_score(y_test, test_pred, beta=2)
