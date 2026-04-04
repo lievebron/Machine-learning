@@ -170,7 +170,7 @@ def build_pipeline():
                 "rfe",
                 RFE(
                     estimator=lr_for_rfe,
-                    n_features_to_select=10,
+                    n_features_to_select=10, # doorgaan met schrappen tot er nog maar 10 features over zijn
                     step=0.1,
                 ),
             ),
